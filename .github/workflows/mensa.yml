@@ -1,0 +1,59 @@
+name: Post Mensa menu
+
+on:
+  schedule:
+    # 10:00 Europe/Berlin is 08:00 UTC in summer and 09:00 UTC in winter, so trigger at both.
+    # The gate step below lets only the run that lands at 10-11 Berlin time through.
+    - cron: '0 8,9 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: mensa-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate (Berlin time + manual override)
+        id: gate
+        run: |
+          hour=$(TZ=Europe/Berlin date +%-H)
+          echo "date=$(TZ=Europe/Berlin date +%F)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" = 10 ] || [ "$hour" = 11 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Berlin hour is $hour, skipping."
+          fi
+
+      # "Posted today" marker so the second cron trigger (or a delayed one) never posts twice.
+      - name: Check if already posted today
+        id: posted
+        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: .posted
+          key: mensa-posted-${{ steps.gate.outputs.date }}
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true' && steps.posted.outputs.cache-hit != 'true'
+        with:
+          node-version: 24
+
+      - name: Post menu
+        if: steps.gate.outputs.run == 'true' && steps.posted.outputs.cache-hit != 'true'
+        run: node src/index.js
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: Mark as posted
+        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule' && steps.posted.outputs.cache-hit != 'true'
+        run: date -u > .posted
+      - uses: actions/cache/save@v4
+        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule' && steps.posted.outputs.cache-hit != 'true'
+        with:
+          path: .posted
+          key: mensa-posted-${{ steps.gate.outputs.date }}

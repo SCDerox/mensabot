@@ -1,0 +1,12 @@
+{
+  "name": "studipsucks",
+  "version": "0.1.0",
+  "description": "Posts the daily Mensa Uni Passau menu to a Discord webhook (Components V2)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  }
+}
