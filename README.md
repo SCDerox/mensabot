@@ -10,7 +10,12 @@ one coloured container per category, dish photos as thumbnails, student prices o
 2. That's it. The workflow in `.github/workflows/mensa.yml` posts on weekdays at 10:00 Europe/Berlin.
 
 Scheduled runs post at most once per day (a cache marker guards against the DST double trigger and
-delayed runs). Run it manually from the Actions tab with "Run workflow"; manual runs always post.
+delayed runs). Manual runs always post: use "Run workflow" in the Actions tab (optionally with a date), or
+
+```sh
+gh workflow run mensa.yml -R SCDerox/mensabot            # today
+gh workflow run mensa.yml -R SCDerox/mensabot -f date=2026-10-14
+```
 
 ## Local
 

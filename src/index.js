@@ -8,7 +8,7 @@ if (!webhook) {
   process.exit(1);
 }
 
-const date = process.env.DATE ?? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date());
+const date = process.env.DATE || new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date());
 const title = new Intl.DateTimeFormat('de-DE', {
   weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
 }).format(new Date(`${date}T12:00:00Z`));
