@@ -2,9 +2,10 @@ name: Post Mensa menu
 
 on:
   schedule:
-    # 10:00 Europe/Berlin is 08:00 UTC in summer and 09:00 UTC in winter, so trigger at both.
-    # The gate step below lets only the run that lands at 10-11 Berlin time through.
-    - cron: '0 8,9 * * 1-5'
+    # Target is 10:00 Europe/Berlin (08:00 UTC summer, 09:00 UTC winter). GitHub delays or drops
+    # scheduled runs, so fire every 30 min (off the top of the hour) as retries. The gate step
+    # only lets runs at 10-11 Berlin time through and the cache marker keeps it to one post a day.
+    - cron: '7,37 8-10 * * 1-5'
   workflow_dispatch:
     inputs:
       date:
@@ -34,7 +35,7 @@ jobs:
             echo "Berlin hour is $hour, skipping."
           fi
 
-      # "Posted today" marker so the second cron trigger (or a delayed one) never posts twice.
+      # "Posted today" marker so retry triggers never post twice. Manual runs without a custom date set it too.
       - name: Check if already posted today
         id: posted
         if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule'
@@ -56,10 +57,10 @@ jobs:
           DATE: ${{ inputs.date }}
 
       - name: Mark as posted
-        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule' && steps.posted.outputs.cache-hit != 'true'
+        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '') && steps.posted.outputs.cache-hit != 'true'
         run: date -u > .posted
       - uses: actions/cache/save@v4
-        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule' && steps.posted.outputs.cache-hit != 'true'
+        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '') && steps.posted.outputs.cache-hit != 'true'
         with:
           path: .posted
           key: mensa-posted-${{ steps.gate.outputs.date }}
