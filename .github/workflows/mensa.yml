@@ -35,10 +35,10 @@ jobs:
             echo "Berlin hour is $hour, skipping."
           fi
 
-      # "Posted today" marker so retry triggers never post twice. Manual runs without a custom date set it too.
+      # "Posted today" marker so retry triggers never post twice. Manual/API runs without a custom date use it too (e.g. cronjob.com); a custom date always posts.
       - name: Check if already posted today
         id: posted
-        if: steps.gate.outputs.run == 'true' && github.event_name == 'schedule'
+        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '')
         uses: actions/cache/restore@v4
         with:
           path: .posted
