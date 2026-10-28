@@ -27,13 +27,14 @@ export function countComponents(c) {
 
 function dishComponent(d, style) {
   const tags = d.tags.map(t => `${TAG_EMOJI[t.toLowerCase()] ?? '•'} ${t}`).join('  ');
-  const meta = [tags, d.allergens && `Allergene: ${d.allergens}`].filter(Boolean).join('  ·  ');
-  const content = [`**${d.name}**`, meta && `-# ${meta}`, d.prices[0] && `💶 **${d.prices[0]}**`].filter(Boolean).join('\n');
+  const meta = [d.removed && '❌ **Entfällt**', d.added && '🆕 **Neu**', tags, d.allergens && `Allergene: ${d.allergens}`].filter(Boolean).join('  ·  ');
+  const strike = s => (d.removed ? `~~${s}~~` : s);
+  const content = [strike(`**${d.name}**`), meta && `-# ${meta}`, d.prices[0] && strike(`💶 **${d.prices[0]}**`)].filter(Boolean).join('\n');
   // Always a Section so every row has the same layout; dishes without a photo get an emoji stand-in.
   return {
     type: SECTION,
     components: [text(content)],
-    accessory: { type: THUMBNAIL, media: { url: d.imageUrl ?? emojiUrl(style.placeholder) } },
+    accessory: { type: THUMBNAIL, media: { url: d.imageUrl ?? emojiUrl(style.placeholder) }, ...(d.removed && { spoiler: true }) },
   };
 }
 
@@ -50,8 +51,8 @@ function container(category, style, dishes) {
  * Whole categories are packed into messages; a category is only split (heading repeated) when it can't
  * fit in a single message on its own.
  */
-export function buildMessages(groups, title) {
-  const header = text(`# 🍽️ Mensa Uni Passau\n-# ${title} · Preise für Studierende`);
+export function buildMessages(groups, title, updatedAt) {
+  const header = text(`# 🍽️ Mensa Uni Passau\n-# ${title} · Preise für Studierende${updatedAt ? ` · Aktualisiert ${updatedAt}` : ''}`);
 
   const blocks = [];
   for (const g of groups) {
@@ -95,13 +96,43 @@ export function buildMessages(groups, title) {
   return messages.map(components => ({ flags: IS_COMPONENTS_V2, components }));
 }
 
+async function send(url, method, payload) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: payload && JSON.stringify(payload),
+  });
+  if (!res.ok && res.status !== 404) throw new Error(`Discord webhook ${method} failed: HTTP ${res.status} ${await res.text()}`);
+  return res;
+}
+
+/** Posts the payloads as new messages and returns their ids. */
 export async function postMessages(webhookUrl, payloads) {
+  const ids = [];
   for (const payload of payloads) {
-    const res = await fetch(`${webhookUrl}?with_components=true&wait=true`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`Discord webhook failed: HTTP ${res.status} ${await res.text()}`);
+    const res = await send(`${webhookUrl}?with_components=true&wait=true`, 'POST', payload);
+    if (!res.ok) throw new Error(`Discord webhook POST failed: HTTP ${res.status} ${await res.text()}`);
+    ids.push((await res.json()).id);
   }
+  return ids;
+}
+
+/**
+ * Brings already posted messages (`ids`) in line with `payloads`: edits in place, posts extras when the menu
+ * grew, deletes leftovers when it shrank, and reposts a message somebody deleted. Returns the new id list.
+ */
+export async function syncMessages(webhookUrl, payloads, ids) {
+  const out = [];
+  for (const [i, payload] of payloads.entries()) {
+    if (i < ids.length) {
+      const res = await send(`${webhookUrl}/messages/${ids[i]}?with_components=true`, 'PATCH', payload);
+      if (res.ok) {
+        out.push(ids[i]);
+        continue;
+      }
+    }
+    out.push(...await postMessages(webhookUrl, [payload]));
+  }
+  for (const id of ids.slice(payloads.length)) await send(`${webhookUrl}/messages/${id}`, 'DELETE');
+  return out;
 }

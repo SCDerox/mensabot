@@ -3,9 +3,10 @@ name: Post Mensa menu
 on:
   schedule:
     # Target is 10:00 Europe/Berlin (08:00 UTC summer, 09:00 UTC winter). GitHub delays or drops
-    # scheduled runs, so fire every 30 min (off the top of the hour) as retries. The gate step
-    # only lets runs at 10-11 Berlin time through and the cache marker keeps it to one post a day.
-    - cron: '7,37 8-10 * * 1-5'
+    # scheduled runs, so fire every 30 min (off the top of the hour) as retries and as menu re-checks.
+    # The gate step only lets runs at 10-13 Berlin time through. The first run of the day posts, later
+    # runs only edit that post if the Mensa changed the menu (state is kept in the Actions cache).
+    - cron: '7,37 8-12 * * 1-5'
   workflow_dispatch:
     inputs:
       date:
@@ -28,39 +29,41 @@ jobs:
         run: |
           hour=$(TZ=Europe/Berlin date +%-H)
           echo "date=$(TZ=Europe/Berlin date +%F)" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" = 10 ] || [ "$hour" = 11 ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" -ge 10 -a "$hour" -le 13 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Berlin hour is $hour, skipping."
           fi
 
-      # "Posted today" marker so retry triggers never post twice. Manual/API runs without a custom date use it too (e.g. cronjob.com); a custom date always posts.
-      - name: Check if already posted today
-        id: posted
+      # Remembers which messages were posted today and with which menu, so every later run edits them
+      # instead of posting again. API/manual runs without a custom date share it (e.g. cronjob.com
+      # re-checking the menu); a custom date always posts fresh and keeps no state.
+      - name: Restore today's state
         if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '')
         uses: actions/cache/restore@v4
         with:
-          path: .posted
-          key: mensa-posted-${{ steps.gate.outputs.date }}
+          path: .state.json
+          key: mensa-state-${{ steps.gate.outputs.date }}-restore
+          restore-keys: mensa-state-${{ steps.gate.outputs.date }}-
 
       - uses: actions/setup-node@v4
-        if: steps.gate.outputs.run == 'true' && steps.posted.outputs.cache-hit != 'true'
+        if: steps.gate.outputs.run == 'true'
         with:
           node-version: 24
 
-      - name: Post menu
-        if: steps.gate.outputs.run == 'true' && steps.posted.outputs.cache-hit != 'true'
+      - name: Post or update menu
+        id: post
+        if: steps.gate.outputs.run == 'true'
         run: node src/index.js
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DATE: ${{ inputs.date }}
+          STATE_FILE: ${{ (github.event_name == 'schedule' || inputs.date == '') && '.state.json' || '' }}
 
-      - name: Mark as posted
-        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '') && steps.posted.outputs.cache-hit != 'true'
-        run: date -u > .posted
+      # Cache keys are immutable, so every change gets its own key; restore picks the newest one.
       - uses: actions/cache/save@v4
-        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '') && steps.posted.outputs.cache-hit != 'true'
+        if: steps.post.outputs.changed == 'true'
         with:
-          path: .posted
-          key: mensa-posted-${{ steps.gate.outputs.date }}
+          path: .state.json
+          key: mensa-state-${{ steps.gate.outputs.date }}-${{ github.run_id }}
