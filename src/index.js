@@ -24,6 +24,11 @@ let state = STATE_FILE && existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE
 if (state?.date !== date) state = null;
 
 const EXCLUDED_CATEGORIES = new Set(['Suppen']);
+// The Mensa publishes the categories one after another, so the first post of a day waits until all of these
+// exist (otherwise the rest would trail in as extra messages). Past FALLBACK_HOUR it posts whatever there is,
+// e.g. on days without desserts. A run with an explicit DATE never waits.
+const REQUIRED_CATEGORIES = ['Hauptgerichte', 'Beilagen', 'Nachspeisen'];
+const FALLBACK_HOUR = 12;
 const EXCLUDED_DISHES = /^salat\s*(buffet|bar)/i; // always available, so just noise
 
 const groups = parseMenu(await fetchMenuHtml(date))
@@ -34,6 +39,15 @@ if (!groups.length) {
   // Never strike through a whole posted menu because the site returned nothing for a moment.
   console.log(`No menu for ${date}, nothing to ${state ? 'update' : 'post'}.`);
   process.exit(0);
+}
+
+if (!state && !process.env.DATE) {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: 'Europe/Berlin' }).format(now));
+  const missing = REQUIRED_CATEGORIES.filter(c => !groups.some(g => g.category === c));
+  if (missing.length && hour < FALLBACK_HOUR) {
+    console.log(`Menu for ${date} incomplete (missing ${missing.join(', ')}), waiting.`);
+    process.exit(0);
+  }
 }
 
 const menu = mergeMenus(state?.menu, groups);

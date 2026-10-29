@@ -1,12 +1,10 @@
 name: Post Mensa menu
 
 on:
-  schedule:
-    # Target is 10:00 Europe/Berlin (08:00 UTC summer, 09:00 UTC winter). GitHub delays or drops
-    # scheduled runs, so fire every 30 min (off the top of the hour) as retries and as menu re-checks.
-    # The gate step only lets runs at 10-13 Berlin time through. The first run of the day posts, later
-    # runs only edit that post if the Mensa changed the menu (state is kept in the Actions cache).
-    - cron: '7,37 8-12 * * 1-5'
+  # No schedule: cronjob.com triggers this via workflow_dispatch (GitHub's own cron is delayed or dropped).
+  # The gate step only lets runs at 9-13 Berlin time through, so the menu is first posted from 09:00 on
+  # instead of right after midnight. The first run of the day posts, later runs only edit that post if
+  # the Mensa changed the menu (state is kept in the Actions cache).
   workflow_dispatch:
     inputs:
       date:
@@ -24,12 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Gate (Berlin time + manual override)
+      - name: Gate (Berlin time + explicit date override)
         id: gate
         run: |
           hour=$(TZ=Europe/Berlin date +%-H)
           echo "date=$(TZ=Europe/Berlin date +%F)" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" -ge 10 -a "$hour" -le 13 ]; then
+          if [ -n "${{ inputs.date }}" ] || [ "$hour" -ge 9 -a "$hour" -le 13 ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -40,7 +38,7 @@ jobs:
       # instead of posting again. API/manual runs without a custom date share it (e.g. cronjob.com
       # re-checking the menu); a custom date always posts fresh and keeps no state.
       - name: Restore today's state
-        if: steps.gate.outputs.run == 'true' && (github.event_name == 'schedule' || inputs.date == '')
+        if: steps.gate.outputs.run == 'true' && inputs.date == ''
         uses: actions/cache/restore@v4
         with:
           path: .state.json
@@ -59,7 +57,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DATE: ${{ inputs.date }}
-          STATE_FILE: ${{ (github.event_name == 'schedule' || inputs.date == '') && '.state.json' || '' }}
+          STATE_FILE: ${{ inputs.date == '' && '.state.json' || '' }}
 
       # Cache keys are immutable, so every change gets its own key; restore picks the newest one.
       - uses: actions/cache/save@v4
